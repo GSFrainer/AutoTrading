@@ -17,6 +17,7 @@ from binance_f.constant.test import *
 from binance_f.model.constant import *
 from twisted.internet import reactor
 
+# Change the configExample.py with your API  key and secret. Rename to config.py
 import config
 
 # endregion
