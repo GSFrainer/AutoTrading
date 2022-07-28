@@ -23,8 +23,11 @@ class Pair:
 
     values = None
     indicators = None
+    strategy = None
 
-    def __init__(self, symbol, baseToken, pairToken, pricePrecision, quantityPrecision, minQuantity, indicators):
+    active = True
+
+    def __init__(self, symbol, baseToken, pairToken, pricePrecision, quantityPrecision, minQuantity, indicators, strategy):
         self.symbol = symbol
         self.baseToken = baseToken
         self.pairToken = pairToken
@@ -37,8 +40,8 @@ class Pair:
         self.values = self.values.astype({"time": 'int64', "KLineStart": 'int64', "KLineClose": 'int64', "FirstTradeID": 'int64', "LastTradeID": 'int64', "NumberOfTrades": 'int64', "IsKLineClose": 'boolean'}, copy=False)
 
         self.indicators = indicators
+        self.strategy = strategy
 
-        #pprint(self.__dict__)
     
     def addValue(self, data):
         self.values = self.values.append(data, ignore_index=True)
@@ -48,4 +51,3 @@ class Pair:
     def applyIndicator(self, indicator):
         if self.indicators[indicator]['Type'].lower() in dir(self.values.ta):
             getattr(self.values.ta, self.indicators[indicator]['Type'].lower())(close = self.values['ClosePrice'], append=True, **self.indicators[indicator]['Params'])
-        #pprint(self.values.iloc[-1])

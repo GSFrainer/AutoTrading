@@ -1,7 +1,8 @@
 # region Imports
-from Orders import Orders
-from Strategy import BasicStrategy
+from Actions import Orders
+import Strategy
 from Pair import Pair
+
 import json
 import time
 from datetime import datetime
@@ -11,14 +12,18 @@ from pprint import pp, pprint
 import pandas as pd
 import pandas_ta as ta
 import websocket
+
+# region Import Binance 
 from binance_f import RequestClient, SubscriptionClient
 from binance_f.base.printobject import *
 from binance_f.constant.test import *
 from binance_f.model.constant import *
 from twisted.internet import reactor
+# endregion
 
-# Change the configExample.py with your API  key and secret. Rename to config.py
-import config
+# Change the AccessExample.py with your API  key and secret. Rename to access.py
+import Access
+import TradeConfig
 
 # endregion
 
@@ -30,63 +35,20 @@ pd.options.display.float_format = '{:.3f}'.format
 # Exchenge API
 SOCKET = "wss://fstream.binance.com/ws"
 INTERVAL = CandlestickInterval.MIN1
-request_client = RequestClient(api_key=config.KEY, secret_key=config.SECRET)
+request_client = RequestClient(api_key=Access.KEY, secret_key=Access.SECRET)
+
 
 # Symbols
-symbols = {
-    'BTCUSDT': {"leverage": 28, "resource": 2.0},
-}
+symbols = TradeConfig.symbols
 
 # Indicators
-indicators = {
-    "StochRSI":{
-        "Type": "StochRSI",
-        "Params":{
-            "rsi_length":14,
-            "length":14,
-            "k": 3,
-            "d": 3,
-            "col_names": ("StochRSI_D", "StochRSI_K")
-        }
-    },
-    "EMA_8":{
-        "Type": "EMA",
-        "Params":{
-            "length":8
-        }
-    },
-    "EMA_200":{
-        "Type": "EMA",
-        "Params":{
-            "length":200
-        }
-    },
-    "MACD":{
-        "Type": "MACD",
-        "Params":{
-            "fast": 12, 
-            "slow": 26, 
-            "signal": 9,
-            "col_names": ("MACD", "MACD_H", "MACD_S")
-        }
-    },
-    "ATR":{
-        "Type": "ATR",
-        "Params":{
-            "length":14, 
-            "mamode": "rma"
-        }
-    },
-}
+indicators = TradeConfig.indicators
 
 # Pairs for trade
 pairs = {}
 
 # Orders functions
 orders = Orders(request_client=request_client)
-
-# Strategy
-strategy = BasicStrategy(orders=orders)
 
 # Account Balance
 balance = 0.0
@@ -96,9 +58,9 @@ def updateBalance():
     global balance
     balance = request_client.get_balance_v2()
     for b in balance:
-        if b.asset == 'USDT':
+        if b.asset == TradeConfig.baseCurrency:
             balance = b.availableBalance
-            print("\n- Balance: "+str(balance))
+            print("\n- Balance: "+str(balance)+" "+TradeConfig.baseCurrency)
             break
 
 
@@ -152,9 +114,6 @@ def onOpenSocket(ws: websocket):
 # Close websocket
 def onCloseSocket(ws):
     print('\n-------------- Close --------------\n')
-    # for pair in pairs:
-    #     print(pairs[pair].values)
-    #     print(pairs[pair].__dict__)
 
 
 # Receive websocket data
@@ -167,7 +126,7 @@ def onReceiveData(ws, message):
 
         msgData = msg['k']
 
-        if msgData['x'] == True: #Change!
+        if msgData['x'] == True: #True = Close Candle / False = Every Candle
             print("\nSymbol: "+msgData['s']+"   ClosePrice: "+msgData['c'])
             pairs[msg['s']].addValue(
                 {
@@ -190,7 +149,7 @@ def onReceiveData(ws, message):
                     "TakerBuyQuoteAssetVolume": float(msgData['Q'])
                 })
             
-            strategy.execute(pair=pairs[msg['s']], balance=balance)
+            pairs[msg['s']].strategy.execute(pair=pairs[msg['s']], balance=balance)
 
     except Exception as e:        
         if e.args[0] == 'e':
@@ -198,24 +157,41 @@ def onReceiveData(ws, message):
         pprint(e)
 
 
+
+
+
 # Load pairs infos
 symbolsInf = request_client.get_exchange_information().symbols
 keys = symbols.keys()
 
 print("\n- Pairs:")
-for symbolInf in symbolsInf:
-    if symbolInf.symbol in keys:
-        minQty = 0
-        for f in symbolInf.filters:
-            if f['filterType'] == 'LOT_SIZE':
-                minQty = f['minQty']
-                break
+try:
+    for symbolInf in symbolsInf:
+        if symbolInf.symbol in keys:
+            minQty = 0
+            for f in symbolInf.filters:
+                if f['filterType'] == 'LOT_SIZE':
+                    minQty = f['minQty']
+                    break
 
-        pairs[symbolInf.symbol] = Pair(symbol=symbolInf.symbol.lower(), baseToken=symbolInf.quoteAsset, pairToken=symbolInf.baseAsset, pricePrecision=symbolInf.pricePrecision, quantityPrecision=symbolInf.quantityPrecision, minQuantity=minQty, indicators=indicators)
-        print("  - "+symbolInf.baseAsset+'/'+symbolInf.quoteAsset)
-        
-    if len(pairs) >= len(keys):
-        break
+            pairStrategy = symbols[symbolInf.symbol]["strategy"](orders=orders)
+
+            if not issubclass(type(pairStrategy), Strategy.Strategy):
+                raise Exception("Invalid strategy")
+            
+            pairs[symbolInf.symbol] = Pair(symbol=symbolInf.symbol.lower(), baseToken=symbolInf.quoteAsset, pairToken=symbolInf.baseAsset, pricePrecision=symbolInf.pricePrecision, quantityPrecision=symbolInf.quantityPrecision, minQuantity=minQty, indicators=indicators, strategy=pairStrategy)
+            print("  - "+symbolInf.baseAsset+'/'+symbolInf.quoteAsset+" ("+type(pairStrategy).__name__+")")
+            
+        if len(pairs) >= len(keys):
+            break
+
+except Exception as PairError:
+    if len(PairError.args) > 0:
+        print(PairError)
+    else:
+        print("Invalid symbol params")
+    sys.exit()
+
 
 # Load balance
 updateBalance()
